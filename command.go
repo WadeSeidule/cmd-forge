@@ -16,19 +16,24 @@ type Helper interface {
 }
 
 type Command struct {
-	Name       string
-	Args       map[string]interface{}
-	Flags      map[string]interface{}
-	ArgTypes   []PositonalArg
-	FlagTypes  []FlagArg
-	Handler    HandlerFunc
-	Help       string
-	Validators []ValidatorFunc
-	Program    string
-	flagSet    *flag.FlagSet
+	Name        string
+	Args        map[string]interface{}
+	Flags       map[string]interface{}
+	SubCommands *Commands
+	ArgTypes    []PositonalArg
+	FlagTypes   []FlagArg
+	Handler     HandlerFunc
+	Help        string
+	Validator   Validator
+	Program     string
+	flagSet     *flag.FlagSet
 }
 
 func (c *Command) Parse(args []string) error {
+	if c.SubCommands != nil {
+		return c.SubCommands.Run(args)
+	}
+
 	c.flagSet = flag.NewFlagSet(c.Name, flag.ExitOnError)
 	c.flagSet.Usage = func() {
 		fmt.Println(c.HelpString())
@@ -70,34 +75,39 @@ func (c *Command) Run() error {
 
 func (c *Command) Validate() []error {
 	var errs []error
-	for _, validator := range c.Validators {
-		err := validator(c)
-		if err != nil {
-			errs = append(errs, err)
-		}
+	errs = append(errs, c.Validator.Validate(c)...)
+
+	for _, cmd := range c.SubCommands.Commands {
+		errs = append(errs, cmd.Validate()...)
 	}
 
 	for _, arg := range c.ArgTypes {
-		for _, validator := range arg.Validators {
-			err := validator(c)
-			if err != nil {
-				errs = append(errs, err)
-			}
-		}
+		errs = append(errs, arg.Validate(c)...)
 	}
 
 	for _, flag := range c.FlagTypes {
-		for _, validator := range flag.Validators {
-			err := validator(c)
-			if err != nil {
-				errs = append(errs, err)
-			}
-		}
+		errs = append(errs, flag.Validate(c)...)
 	}
 	return errs
 }
 
+func (c *Command) HelpString() string {
+	argNames := []string{}
+	for _, arg := range c.ArgTypes {
+		argNames = append(argNames, arg.Name)
+	}
+	var argNamesString string
+	if len(argNames) > 0 {
+		argNamesString = fmt.Sprintf("[%s]", strings.Join(argNames, " "))
+	}
+	argsString, flagsString := c.argHelpStrings()
+	return fmt.Sprintf("Usage: %s %s %s\n%s%s", c.Program, c.Name, argNamesString, argsString, flagsString)
+}
+
 func (c *Command) validateNumRequiredArgs(args []string) error {
+	if len(c.SubCommands.Commands) > 0 && len(args) > 0 {
+		return fmt.Errorf("cannot have postional arguments with subcommands defined. Expected one of '%s'", c.SubCommands.ListCommands())
+	}
 	requiredArgs := 0
 	for _, arg := range c.ArgTypes {
 		if arg.Required {
@@ -137,19 +147,6 @@ func (c *Command) argHelpStrings() (string, string) {
 		flagStrings = append(flagStrings, flag.HelpString())
 	}
 	return strings.Join(argStrings, "\n"), strings.Join(flagStrings, "\n")
-}
-
-func (c *Command) HelpString() string {
-	argNames := []string{}
-	for _, arg := range c.ArgTypes {
-		argNames = append(argNames, arg.Name)
-	}
-	var argNamesString string
-	if len(argNames) > 0 {
-		argNamesString = fmt.Sprintf("[%s]", strings.Join(argNames, " "))
-	}
-	argsString, flagsString := c.argHelpStrings()
-	return fmt.Sprintf("Usage: %s %s %s\n%s%s", c.Program, c.Name, argNamesString, argsString, flagsString)
 }
 
 func (c *Command) createArgsMap() (map[string]interface{}, error) {

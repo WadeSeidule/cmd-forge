@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"flag"
 	"fmt"
 	"strings"
 )
@@ -24,16 +23,16 @@ func (c *Commands) ListCommands() string {
 	return strings.Join(cmdNames, ", ")
 }
 
-func (c *Commands) Run(cmd string, args []string) error {
-	if cmd == "help" {
-		fmt.Print(c.HelpString())
-		return nil
+func (c *Commands) Run(args []string) error {
+	cmd, args, err := c.parseArgs(args)
+	if err != nil {
+		return err
 	}
 	exists, cmdStruct := c.Contains(cmd)
 	if !exists {
 		return fmt.Errorf("command '%s' not found. Expected one of '%s'", cmd, c.ListCommands())
 	}
-	err := cmdStruct.Parse(args)
+	err = cmdStruct.Parse(args)
 	if err != nil {
 		return err
 	}
@@ -48,12 +47,16 @@ func (c *Commands) AddCommand(cmd *Command) {
 	c.Commands[cmd.Name] = cmd
 }
 
-func (c *Commands) ParseArgs() (string, []string, error) {
-	flag.Parse()
-	if len(flag.Args()) == 0 {
+func (c *Commands) parseArgs(args []string) (string, []string, error) {
+	if len(args) == 0 {
 		return "", nil, fmt.Errorf("expected a command. Expected one of '%s'", c.ListCommands())
 	}
-	return flag.Args()[0], flag.Args()[1:], nil
+	cmd, cmdArgs := args[0], args[1:]
+	if cmd == "help" {
+		fmt.Print(c.HelpString())
+		return "", nil, nil
+	}
+	return cmd, cmdArgs, nil
 }
 
 func (c *Commands) HelpString() string {
